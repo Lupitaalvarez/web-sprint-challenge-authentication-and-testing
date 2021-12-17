@@ -1,7 +1,25 @@
 const router = require('express').Router();
+const model = require('./auth-model');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const secret = require('../secret');
 
-router.post('/register', (req, res) => {
-  res.end('implement register, please!');
+const processErr = (res, where) => err => res.status(500).json({where, message:err.message, stack:err.stack, error:err});
+
+ router.post('/register', async (req, res) => {
+   const { username, password } = req.body;
+   if(!username||!password) res.status(400).json({message:"username and password required"});
+   else if(typeof username !== "string" && typeof password !== "string") res.status(400).json({message:"username and password must be of type string"});
+   else await model.getBy({ username }).then(users => {
+     if(!!users.length) res.status(400).json({message:"username taken"})
+     else {
+       const hash = bcrypt.hashSync(password, 8);
+       req.payload = { username, password: hash };
+       model.insert(req.payload)
+         .then(user => res.status(201).json(user))
+         .catch(processErr(res, "adding user"));
+     }
+   })
   /*
     IMPLEMENT
     You are welcome to build additional middlewares to help with the endpoint's functionality.
@@ -29,8 +47,20 @@ router.post('/register', (req, res) => {
   */
 });
 
-router.post('/login', (req, res) => {
-  res.end('implement login, please!');
+router.post('/login', async (req, res) => {
+  const { username, password } = req.body;
+  if(!username||!password) res.status(400).json({message:"username and password required"});
+  else if(typeof username !== "string" && typeof password !== "string") res.status(400).json({message:"username and password must be of type string"});
+  else {
+    model.getBy({ username }).first()
+      .then(user => {
+        if(user && bcrypt.compareSync(password, user.password)) {
+          const token = jwt.sign({subject:user.id, username}, secret, {expiresIn: "1d"});
+          res.status(200).json({message:`welcome, ${username}`, token});
+        }
+        else res.status(400).json({message:"invalid credentials"});
+      })
+  }
   /*
     IMPLEMENT
     You are welcome to build additional middlewares to help with the endpoint's functionality.
