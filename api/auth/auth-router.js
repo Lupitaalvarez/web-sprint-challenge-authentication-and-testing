@@ -1,25 +1,42 @@
 const router = require('express').Router();
-const model = require('./auth-model');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const secret = require('../secret');
+const bcrypt = require('bcryptjs')
+const { BCRYPT_ROUNDS } = require('./../secrets/index')
+const User = require('./../users/user-model')
+const buildToken = require('./token-builder')
 
-const processErr = (res, where) => err => res.status(500).json({where, message:err.message, stack:err.stack, error:err});
+const { 
+   checksUsernameIsFree, 
+   validateBody,
+   checkUserRegistered 
+ } = require('./auth-middleware')
 
- router.post('/register', async (req, res) => {
-   const { username, password } = req.body;
-   if(!username||!password) res.status(400).json({message:"username and password required"});
-   else if(typeof username !== "string" && typeof password !== "string") res.status(400).json({message:"username and password must be of type string"});
-   else await model.getBy({ username }).then(users => {
-     if(users.length) res.status(400).json({message:"username taken"})
-     else {
-       const hash = bcrypt.hashSync(password, 8);
-       req.payload = { username, password: hash };
-       model.insert(req.payload)
-         .then(user => res.status(201).json(user))
-         .catch(processErr(res, "adding user"));
-     }
-   })
+ router.get('/', (req, res, next) => {
+   User.getAll()
+     .then(users => {
+       res.status(200).json(users)
+     })
+     .catch(next)
+ })
+
+ router.get('/:id', (req, res, next) => {
+   User.getById(req.params.id)
+     .then(user => {
+       res.status(200).json(user)
+     })
+     .catch(next)
+ })
+
+ router.post('/register', validateBody, checksUsernameIsFree, (req, res, next) => {
+   let user = req.body
+   const rounds = parseInt(BCRYPT_ROUNDS) || 8
+   const hash = bcrypt.hashSync(user.password, rounds)
+   user.password = hash
+
+   User.insert(user)
+     .then((newUser) => {
+       res.status(201).json(newUser)
+     })
+     .catch(next)
   /*
     IMPLEMENT
     You are welcome to build additional middlewares to help with the endpoint's functionality.
@@ -47,19 +64,17 @@ const processErr = (res, where) => err => res.status(500).json({where, message:e
   */
 });
 
-router.post('/login', async (req, res) => {
-  const { username, password } = req.body;
-  if(!username||!password) res.status(400).json({message:"username and password required"});
-  else if(typeof username !== "string" && typeof password !== "string") res.status(400).json({message:"username and password must be of type string"});
-  else {
-    model.getBy({ username }).first()
-      .then(user => {
-        if(user && bcrypt.compareSync(password, user.password)) {
-          const token = jwt.sign({subject:user.id, username}, secret, {expiresIn: "1d"});
-          res.status(200).json({message:`welcome, ${username}`, token});
-        }
-        else res.status(400).json({message:"invalid credentials"});
-      })
+router.post("/login", validateBody, checkUserRegistered, (req, res, next) => {
+  const user = req.body
+  const token = buildToken(user)
+  console.log(token)
+  try {
+    res.status(200).json({
+      message: `Welcome, ${user.username}`,
+      token
+    })
+  } catch(err){
+    next(err)
   }
   /*
     IMPLEMENT
